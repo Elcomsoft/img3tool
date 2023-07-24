@@ -103,7 +103,7 @@ plist_t readPlistFromFile(const char *filePath){
     retassure(buf = (char*)malloc(bufSize = st.st_size), "Failed to malloc buf");
     retassure(read(fd, buf, bufSize) == bufSize, "Failed to read file");
     plist_t plist = NULL;
-    plist_from_memory(buf, (uint32_t)bufSize, &plist);
+    plist_from_memory(buf, (uint32_t)bufSize, &plist, NULL);
     return plist;
 }
 #endif //HAVE_PLIST
@@ -224,6 +224,7 @@ int main_r(int argc, const char * argv[]) {
         }
     }else if (flags & FLAG_CREATE) {
         retassure(outFile, "Outfile required for operation");
+        retassure(img3Type, "img3Type required for operation");
         std::vector<uint8_t> img3;
         if (payloadimg3) {
             img3 = readFromFile(payloadimg3);

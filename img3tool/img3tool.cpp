@@ -28,6 +28,9 @@ extern "C"{
 #   ifdef HAVE_COMMCRYPTO
 #       include <CommonCrypto/CommonCrypto.h>
 #       include <CommonCrypto/CommonDigest.h>
+#       define SHA_CTX CC_SHA1_CTX
+#       define SHA1_Init CC_SHA1_Init
+#       define SHA1_Update CC_SHA1_Update
 #       define SHA1(d, n, md) CC_SHA1(d, n, md)
 #       define SHA384(d, n, md) CC_SHA384(d, n, md)
 #       define SHA_DIGEST_LENGTH CC_SHA1_DIGEST_LENGTH
@@ -251,7 +254,7 @@ void img3tool::printIMG3(const void *buf, size_t size){
         uint8_t *sigbuf = (uint8_t*)&header->sigCheckAreaSize;
         size_t sigbufSize = sizeof(img3) - offsetof(img3, sigCheckAreaSize) + header->sigCheckAreaSize;
         uint8_t shasum[SHA_DIGEST_LENGTH] = {};
-        SHA1(sigbuf, sigbufSize, shasum);
+        SHA1(sigbuf, (unsigned int)sigbufSize, shasum);
         printf("---------------------------------------------\n");
         printf("       Digest: ");
         for (int i=0; i<sizeof(shasum); i++) printf("%02x",shasum[i]);
@@ -305,6 +308,7 @@ const img3Tag *getValRawPtrFromIMG3(const void *buf, size_t size, uint32_t val){
 
 std::vector<uint8_t> img3tool::getValFromIMG3(const void *buf, size_t size, uint32_t val){
     const img3Tag *tag = getValRawPtrFromIMG3(buf, size, val);
+    retassure(tag, "Failed to get tag for val '%.*s'",4,&val);
     /*
         wtf??
         DATA might be encrypted, but not a multiple of 16
@@ -330,7 +334,6 @@ std::vector<uint8_t> img3tool::getPayloadFromIMG3(const void *buf, size_t size, 
         reterror("decryption keys were provided, but img4tool was compiled without crypto backend!");
 #endif //HAVE_CRYPTO
     }
-    
     auto ret = uncompressIfNeeded(payload, outUsedCompression, NULL, NULL);
     
     return ret;
@@ -510,6 +513,22 @@ restart:
     return img3;
 }
 
+uint32_t img3tool::getImg3ImageType(const void *buf, size_t size){
+    try {
+        auto type = img3tool::getValFromIMG3(buf, size, 'TYPE');
+        if (type.size() == 4){
+            return *(uint32_t*)type.data();
+        }
+    } catch (tihmstar::exception &e) {
+#ifdef DEBUG
+        debug("failed to get IMG3 Tag for val 'TYPE' with error:\n%s",e.dumpStr().c_str());
+#endif
+    }
+    img3 *header = verifyIMG3Header(buf, size);
+    return header->identifier;
+}
+
+
 bool img3tool::img3ContainsKBAG(const void *buf, size_t size){
     img3 *header = verifyIMG3Header(buf, size);
     
@@ -560,6 +579,12 @@ std::string img3tool::getKBAG(const void *buf, size_t size, int kbagNum){
                     retval.resize(0x10 + 0x20);
                     memcpy((char*)&retval.data()[0], keybag->iv, sizeof(keybag->iv));
                     memcpy((char*)&retval.data()[0x10], keybag->key, sizeof(keybag->key));
+                    for (int i=0x20; i<0x30; i++) if (retval.data()[i]) return retval;
+                    /*
+                        Very old device only use 0x20 bytes.
+                        If the 0x10 last bytes are all zero, we assume that's the case
+                     */
+                    retval.resize(0x20);
                     return retval;
                 }
             }
@@ -641,12 +666,13 @@ bool img3tool::verifySignedIMG3File(const void *buf, size_t size){
 
     {
         uint8_t shasum[SHA_DIGEST_LENGTH] = {};
-        SHA1(sigbuf, sigbufSize, shasum);
+        SHA1(sigbuf, (unsigned long)sigbufSize, shasum);
         printf("Digest: ");
         for (int i=0; i<sizeof(shasum); i++) printf("%02x",shasum[i]);
         printf("\n");
     }
-    
+
+#   ifdef HAVE_OPENSSL
     try{
         EVP_MD_CTX *mdctx = NULL;
         cleanup([&]{
@@ -668,6 +694,9 @@ bool img3tool::verifySignedIMG3File(const void *buf, size_t size){
     }catch (...){
         return false;
     }
+#   else
+    warning("Compiled without openssl, not verifying RSA signature");
+#   endif //HAVE_OPENSSL
     return true;
 #endif
 }
@@ -691,6 +720,7 @@ std::vector<uint8_t> img3tool::decryptPayload(const std::vector<uint8_t> &payloa
 
 
     std::vector<uint8_t> decPayload{payload};
+    size_t decryptionSize = decPayload.size() & ~0xf;
 
     assure(strlen(decryptIv) == sizeof(iv)*2);
     keySize = strlen(decryptKey);
@@ -710,12 +740,12 @@ std::vector<uint8_t> img3tool::decryptPayload(const std::vector<uint8_t> &payloa
 #ifdef HAVE_OPENSSL
     AES_KEY decKey = {};
     retassure(!AES_set_decrypt_key(key, keySize*8, &decKey), "Failed to set decryption key");
-    AES_cbc_encrypt((const unsigned char*)decPayload.data(), (unsigned char*)decPayload.data(), decPayload.size(), &decKey, iv, AES_DECRYPT);
+    AES_cbc_encrypt((const unsigned char*)decPayload.data(), (unsigned char*)decPayload.data(), decryptionSize, &decKey, iv, AES_DECRYPT);
 #else
 #   ifdef HAVE_COMMCRYPTO
     {
         CCCryptorStatus retval = 0;
-        retassure((retval = CCCrypt(kCCDecrypt, kCCAlgorithmAES, 0, key, keySize, iv, decPayload.data(), decPayload.size(), (void*)decPayload.data(), decPayload.size(), NULL)) == kCCSuccess,
+        retassure((retval = CCCrypt(kCCDecrypt, kCCAlgorithmAES, 0, key, keySize, iv, decPayload.data(), decryptionSize, (void*)decPayload.data(), decPayload.size(), NULL)) == kCCSuccess,
                   "Decryption failed!");
     }
 #   endif //HAVE_COMMCRYPTO

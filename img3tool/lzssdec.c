@@ -42,7 +42,7 @@ void *memmem(const void *haystack_start, size_t haystack_len, const void *needle
         return NULL;
     }
 
-    for (; *haystack && haystack_len--; haystack++) {
+    for (;haystack_len--; haystack++) {
         x = needle_len;
         n = needle;
         h = haystack;

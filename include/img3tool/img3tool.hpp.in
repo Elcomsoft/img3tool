@@ -33,6 +33,9 @@ namespace tihmstar {
 
         std::vector<uint8_t> renameIMG3(const void *buf, size_t size, const char *type);
         std::vector<uint8_t> removeTagFromIMG3(const void *buf, size_t size, uint32_t type);
+        
+        uint32_t getImg3ImageType(const void *buf, size_t size);
+    
         bool img3ContainsKBAG(const void *buf, size_t size);
         std::string getKBAG(const void *buf, size_t size, int kbagNum);
 
