@@ -28,7 +28,7 @@ case $host_os in
   AC_MSG_RESULT([${host_os}])
   crypto_backend="CommCrypto"
         ;;
-  *mingw32*|*cygwin*)
+  *mingw32*|*cygwin*|*msys*)
   AC_MSG_RESULT([${host_os}])
   win32=true
   LDFLAGS+=" -no-undefined -lws2_32"

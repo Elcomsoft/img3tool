@@ -8,14 +8,15 @@
 #ifndef img3tool_hpp
 #define img3tool_hpp
 
-#include <stdlib.h>
-#include <vector>
-#include <stdint.h>
-#include <iostream>
-
 #if @HEADER_HAVE_PLIST@ //HAVE_PLIST
 #include <plist/plist.h>
 #endif //HAVE_PLIST
+
+#include <libgeneral/Mem.hpp>
+#include <vector>
+#include <iostream>
+#include <stdlib.h>
+#include <stdint.h>
 
 namespace tihmstar {
     namespace img3tool {
@@ -23,16 +24,18 @@ namespace tihmstar {
 
         void printIMG3(const void *buf, size_t size);
 
-        std::vector<uint8_t> getValFromIMG3(const void *buf, size_t size, uint32_t val);
-        std::vector<uint8_t> getPayloadFromIMG3(const void *buf, size_t size, const char *decryptIv = NULL, const char *decryptKey = NULL, const char **outUsedCompression = NULL);
+        tihmstar::Mem getValFromIMG3(const void *buf, size_t size, uint32_t val);
+        tihmstar::Mem getPayloadFromIMG3(const void *buf, size_t size, const char *decryptIv = NULL, const char *decryptKey = NULL, const char **outUsedCompression = NULL);
 
-        std::vector<uint8_t> getEmptyIMG3Container(uint32_t identifier);
-        std::vector<uint8_t> appendPayloadToIMG3(const std::vector<uint8_t> &img3, uint32_t identifier, const std::vector<uint8_t> &payload, const char *compression = NULL);
-        
-        std::vector<uint8_t> replaceDATAinIMG3(const std::vector<uint8_t> &img3, const std::vector<uint8_t> &payload, const char *compression = NULL);
+        tihmstar::Mem getEmptyIMG3Container(uint32_t identifier);
+        tihmstar::Mem appendPayloadToIMG3(const tihmstar::Mem &img3, uint32_t identifier, const void *payload, size_t payloadSize, const char *compression = NULL);
+        tihmstar::Mem appendPayloadToIMG3(const tihmstar::Mem &img3, uint32_t identifier, const tihmstar::Mem &payload, const char *compression = NULL);
 
-        std::vector<uint8_t> renameIMG3(const void *buf, size_t size, const char *type);
-        std::vector<uint8_t> removeTagFromIMG3(const void *buf, size_t size, uint32_t type);
+        tihmstar::Mem replaceDATAinIMG3(const tihmstar::Mem &img3, const void *payload, size_t payloadSize, const char *compression = NULL);
+        tihmstar::Mem replaceDATAinIMG3(const tihmstar::Mem &img3, const tihmstar::Mem &payload, const char *compression = NULL);
+
+        tihmstar::Mem renameIMG3(const void *buf, size_t size, const char *type);
+        tihmstar::Mem removeTagFromIMG3(const void *buf, size_t size, uint32_t type);
         
         uint32_t getImg3ImageType(const void *buf, size_t size);
     
@@ -40,7 +43,7 @@ namespace tihmstar {
         std::string getKBAG(const void *buf, size_t size, int kbagNum);
 
 #if @HEADER_HAVE_PLIST@ //HAVE_PLIST
-        std::vector<uint8_t> signIMG3WithSHSH(const void *buf, size_t size, plist_t p_shshfile);
+        tihmstar::Mem signIMG3WithSHSH(const void *buf, size_t size, plist_t p_shshfile);
 #endif //HAVE_PLIST
     
 #if @HEADER_HAVE_CRYPTO@ //HAVE_CRYPTO
@@ -48,7 +51,7 @@ namespace tihmstar {
 #if @HEADER_HAVE_PLIST@ //HAVE_PLIST
         bool verifySignedIMG3FileForSHSH(const void *buf, size_t size, plist_t p_shshfile);
 #endif //HAVE_PLIST
-        std::vector<uint8_t> decryptPayload(const std::vector<uint8_t> &payload, const char *decryptIv, const char *decryptKey);
+        tihmstar::Mem decryptPayload(const tihmstar::Mem &payload, const char *decryptIv, const char *decryptKey);
 #endif //HAVE_CRYPTO
     
     };

@@ -45,7 +45,7 @@ using namespace tihmstar::img3tool;
 
 namespace tihmstar {
     namespace img3tool {
-        std::vector<uint8_t> uncompressIfNeeded(const std::vector<uint8_t> &compressedPayload, const char **outUsedCompression = NULL, const char **outHypervisor = NULL, size_t *outHypervisorSize = NULL);
+        tihmstar::Mem uncompressIfNeeded(const tihmstar::Mem &compressedPayload, const char **outUsedCompression = NULL, const char **outHypervisor = NULL, size_t *outHypervisorSize = NULL);
     };
 };
 
@@ -91,7 +91,7 @@ static std::string img3TagMagicToComponentName(std::string tagMagic){
     }
 }
 
-std::vector<uint8_t> img3tool::uncompressIfNeeded(const std::vector<uint8_t> &compressedPayload, const char **outUsedCompression, const char **outHypervisor, size_t *outHypervisorSize){
+tihmstar::Mem img3tool::uncompressIfNeeded(const tihmstar::Mem &compressedPayload, const char **outUsedCompression, const char **outHypervisor, size_t *outHypervisorSize){
     const char *payload = (const char *)compressedPayload.data();
     size_t payloadSize = compressedPayload.size();
     size_t unpackedLen = 0;
@@ -99,12 +99,12 @@ std::vector<uint8_t> img3tool::uncompressIfNeeded(const std::vector<uint8_t> &co
     cleanup([&]{
         safeFree(unpacked);
     });
-    std::vector<uint8_t> retval = compressedPayload;
+    tihmstar::Mem retval = compressedPayload.copy();
 
     if (strncmp(payload, "complzss", 8) == 0) {
         printf("Compression detected, uncompressing (%s): ", "complzss");
         if((unpacked = tryLZSS(payload, payloadSize, &unpackedLen, outHypervisor, outHypervisorSize))){
-            retval = {unpacked,unpacked+unpackedLen};
+            retval = {unpacked,unpackedLen}; unpacked = NULL; unpackedLen = 0;
             printf("ok\n");
             if (outHypervisor && outHypervisorSize && *outHypervisorSize) {
                 printf("Detected and extracted hypervisor!\n");
@@ -306,7 +306,7 @@ const img3Tag *getValRawPtrFromIMG3(const void *buf, size_t size, uint32_t val){
     return NULL;
 }
 
-std::vector<uint8_t> img3tool::getValFromIMG3(const void *buf, size_t size, uint32_t val){
+tihmstar::Mem img3tool::getValFromIMG3(const void *buf, size_t size, uint32_t val){
     const img3Tag *tag = getValRawPtrFromIMG3(buf, size, val);
     retassure(tag, "Failed to get tag for val '%.*s'",4,&val);
     /*
@@ -320,11 +320,11 @@ std::vector<uint8_t> img3tool::getValFromIMG3(const void *buf, size_t size, uint
             if ((len % 0x10) == 0) break;
         }
     }
-    return {tag->data, tag->data+len};
+    return {tag->data, len};
 }
 
-std::vector<uint8_t> img3tool::getPayloadFromIMG3(const void *buf, size_t size, const char *decryptIv, const char *decryptKey, const char **outUsedCompression){
-    std::vector<uint8_t> payload = getValFromIMG3(buf, size, 'DATA');
+tihmstar::Mem img3tool::getPayloadFromIMG3(const void *buf, size_t size, const char *decryptIv, const char *decryptKey, const char **outUsedCompression){
+    tihmstar::Mem payload = getValFromIMG3(buf, size, 'DATA');
 
     if (decryptIv || decryptKey) {
 #ifdef HAVE_CRYPTO
@@ -339,8 +339,8 @@ std::vector<uint8_t> img3tool::getPayloadFromIMG3(const void *buf, size_t size, 
     return ret;
 }
 
-std::vector<uint8_t> img3tool::getEmptyIMG3Container(uint32_t identifier){
-    std::vector<uint8_t> ret;
+tihmstar::Mem img3tool::getEmptyIMG3Container(uint32_t identifier){
+    tihmstar::Mem ret;
     ret.resize(sizeof(img3) + 0x20);
     img3 *header = (img3*)ret.data();
     header->magic = 'Img3';
@@ -356,24 +356,23 @@ std::vector<uint8_t> img3tool::getEmptyIMG3Container(uint32_t identifier){
     return ret;
 }
 
-std::vector<uint8_t> img3tool::appendPayloadToIMG3(const std::vector<uint8_t> &oldImg3, uint32_t identifier, const std::vector<uint8_t> &payload, const char *compression){
+tihmstar::Mem img3tool::appendPayloadToIMG3(const tihmstar::Mem &oldImg3, uint32_t identifier, const void *payload, size_t payloadSize, const char *compression){
     uint8_t *packed = NULL;
     cleanup([&]{
         safeFree(packed);
     });
-    std::vector<uint8_t> ret;
-    std::vector<uint8_t> tagBuf;
+    tihmstar::Mem ret;
+    tihmstar::Mem tagBuf;
     
-    const uint8_t *payloadBuffer = payload.data();
-    size_t payloadSize = payload.size();
+    const uint8_t *payloadBuffer = (const uint8_t *)payload;
     
     if (compression) {
         if (strcmp(compression, "complzss") == 0) {
-            size_t packedSize = payload.size();
+            size_t packedSize = payloadSize;
             printf("Compression requested, compressing (%s): ", "complzss");
             packed = (uint8_t *)malloc(packedSize);
-            packedSize = lzss_compress((const uint8_t *)payload.data(), (uint32_t)payload.size(), packed, (uint32_t)packedSize);
-            retassure(packedSize <= payload.size(), "compression buffer overflow");
+            packedSize = lzss_compress(payloadBuffer, (uint32_t)payloadSize, packed, (uint32_t)packedSize);
+            retassure(packedSize <= payloadSize, "compression buffer overflow");
             printf("ok\n");
             payloadBuffer = packed;
             payloadSize = packedSize;
@@ -387,8 +386,8 @@ std::vector<uint8_t> img3tool::appendPayloadToIMG3(const std::vector<uint8_t> &o
     tag->totalLength = tag->dataLength + sizeof(img3Tag);
     memcpy(tag->data, payloadBuffer, tag->dataLength);
 
-    ret.insert(ret.end(), oldImg3.begin(), oldImg3.end());
-    ret.insert(ret.end(), tagBuf.begin(), tagBuf.end());
+    ret.append(oldImg3.data(), oldImg3.size());
+    ret.append(tagBuf.data(), tagBuf.size());
     
     img3 *header = (img3*)ret.data();
     header->fullSize += tag->totalLength;
@@ -398,24 +397,27 @@ std::vector<uint8_t> img3tool::appendPayloadToIMG3(const std::vector<uint8_t> &o
     return ret;
 }
 
-std::vector<uint8_t> img3tool::replaceDATAinIMG3(const std::vector<uint8_t> &img3, const std::vector<uint8_t> &payload, const char *compression){
+tihmstar::Mem img3tool::appendPayloadToIMG3(const tihmstar::Mem &oldImg3, uint32_t identifier, const tihmstar::Mem &payload, const char *compression){
+    return appendPayloadToIMG3(oldImg3, identifier, payload.data(), payload.size(), compression);
+}
+
+tihmstar::Mem img3tool::replaceDATAinIMG3(const tihmstar::Mem &img3, const void *payload, size_t payloadSize, const char *compression){
     uint8_t *packed = NULL;
     cleanup([&]{
         safeFree(packed);
     });
-    std::vector<uint8_t> ret;
-    std::vector<uint8_t> tagBuf;
+    tihmstar::Mem ret;
+    tihmstar::Mem tagBuf;
     
-    const uint8_t *payloadBuffer = payload.data();
-    size_t payloadSize = payload.size();
+    const uint8_t *payloadBuffer = (const uint8_t *)payload;
     
     if (compression) {
         if (strcmp(compression, "complzss") == 0) {
-            size_t packedSize = payload.size();
+            size_t packedSize = payloadSize;
             printf("Compression requested, compressing (%s): ", "complzss");
             packed = (uint8_t *)malloc(packedSize);
-            packedSize = lzss_compress((const uint8_t *)payload.data(), (uint32_t)payload.size(), packed, (uint32_t)packedSize);
-            retassure(packedSize <= payload.size(), "compression buffer overflow");
+            packedSize = lzss_compress(payloadBuffer, (uint32_t)payloadSize, packed, (uint32_t)packedSize);
+            retassure(packedSize <= payloadSize, "compression buffer overflow");
             printf("ok\n");
             payloadBuffer = packed;
             payloadSize = packedSize;
@@ -430,8 +432,8 @@ std::vector<uint8_t> img3tool::replaceDATAinIMG3(const std::vector<uint8_t> &img
         retassure(tag->totalLength <= bodySize, "tag->totalLength larger than remaining bodysize");
         retassure(tag->dataLength <= tag->totalLength, "tag->dataLength larger than tag->totalLength");
         if (tag->magic == 'DATA') {
-            std::vector<uint8_t> ret;
-            std::vector<uint8_t> tagBuf;
+            tihmstar::Mem ret;
+            tihmstar::Mem tagBuf;
             
             tagBuf.resize(sizeof(img3Tag) + payloadSize);
             
@@ -467,8 +469,12 @@ std::vector<uint8_t> img3tool::replaceDATAinIMG3(const std::vector<uint8_t> &img
     reterror("Failed to find magic 'DATA'");
 }
 
-std::vector<uint8_t> img3tool::renameIMG3(const void *buf, size_t size, const char *type){
-    std::vector<uint8_t> ret{(uint8_t*)buf,(uint8_t*)buf+size};
+tihmstar::Mem img3tool::replaceDATAinIMG3(const tihmstar::Mem &img3, const tihmstar::Mem &payload, const char *compression){
+    return replaceDATAinIMG3(img3, payload.data(), payload.size(), compression);
+}
+
+tihmstar::Mem img3tool::renameIMG3(const void *buf, size_t size, const char *type){
+    tihmstar::Mem ret{buf,size};
     img3 *header = verifyIMG3Header(ret.data(), ret.size());
     uint32_t bodySize = header->sizeNoHeader;
     for (img3Tag *tag = (img3Tag *)(header+1); bodySize;bodySize -=tag->totalLength, tag = (img3Tag*)&tag->data[tag->totalLength-sizeof(img3Tag)]) {
@@ -485,8 +491,8 @@ std::vector<uint8_t> img3tool::renameIMG3(const void *buf, size_t size, const ch
     reterror("Failed to rename img3");
 }
 
-std::vector<uint8_t> img3tool::removeTagFromIMG3(const void *buf, size_t size, uint32_t type){
-    std::vector<uint8_t> img3{(uint8_t*)buf,(uint8_t*)buf+size};
+tihmstar::Mem img3tool::removeTagFromIMG3(const void *buf, size_t size, uint32_t type){
+    tihmstar::Mem img3{buf,size};
     ::img3 *header = verifyIMG3Header(img3.data(),img3.size());
     uint32_t bodySize = 0;
 
@@ -598,8 +604,8 @@ std::string img3tool::getKBAG(const void *buf, size_t size, int kbagNum){
 }
 
 #ifdef HAVE_PLIST
-std::vector<uint8_t> img3tool::signIMG3WithSHSH(const void *buf, size_t size, plist_t p_shshfile){
-    std::vector<uint8_t> img3clone{(uint8_t*)buf,(uint8_t*)buf+size};
+tihmstar::Mem img3tool::signIMG3WithSHSH(const void *buf, size_t size, plist_t p_shshfile){
+    tihmstar::Mem img3clone{buf,size};
     std::string component;
     {
         //strip old SHSH
@@ -637,7 +643,7 @@ std::vector<uint8_t> img3tool::signIMG3WithSHSH(const void *buf, size_t size, pl
         retassure(p_component = plist_dict_get_item(p_shshfile, component.c_str()),"Failed to get component '%s' from SHSH file",component.c_str());
         retassure(p_blob = plist_dict_get_item(p_component, "Blob"), "Failed to get digest");
         retassure(data = plist_get_data_ptr(p_blob, &dataLen), "Failed to get Blob data");
-        img3clone.insert(img3clone.end(), data, data+dataLen);
+        img3clone.append(data, dataLen);
         
         {
             //fixup signed area
@@ -703,7 +709,7 @@ bool img3tool::verifySignedIMG3File(const void *buf, size_t size){
 
 #ifdef HAVE_PLIST
 bool img3tool::verifySignedIMG3FileForSHSH(const void *buf, size_t size, plist_t p_shshfile){
-    std::vector<uint8_t> img3clone = signIMG3WithSHSH(buf, size, p_shshfile);
+    tihmstar::Mem img3clone = signIMG3WithSHSH(buf, size, p_shshfile);
     return verifySignedIMG3File(img3clone.data(), img3clone.size());
 }
 #endif //HAVE_PLIST
@@ -711,7 +717,7 @@ bool img3tool::verifySignedIMG3FileForSHSH(const void *buf, size_t size, plist_t
 
 #pragma mark begin_needs_crypto
 #ifdef HAVE_CRYPTO
-std::vector<uint8_t> img3tool::decryptPayload(const std::vector<uint8_t> &payload, const char *decryptIv, const char *decryptKey){
+tihmstar::Mem img3tool::decryptPayload(const tihmstar::Mem &payload, const char *decryptIv, const char *decryptKey){
     uint8_t iv[16] = {};
     uint8_t key[32] = {};
     size_t keySize = 0;
@@ -719,7 +725,7 @@ std::vector<uint8_t> img3tool::decryptPayload(const std::vector<uint8_t> &payloa
     retassure(decryptKey, "decryptPayload requires KEY but none was provided!");
 
 
-    std::vector<uint8_t> decPayload{payload};
+    tihmstar::Mem decPayload = payload.copy();
     size_t decryptionSize = decPayload.size() & ~0xf;
 
     assure(strlen(decryptIv) == sizeof(iv)*2);
@@ -740,12 +746,12 @@ std::vector<uint8_t> img3tool::decryptPayload(const std::vector<uint8_t> &payloa
 #ifdef HAVE_OPENSSL
     AES_KEY decKey = {};
     retassure(!AES_set_decrypt_key(key, keySize*8, &decKey), "Failed to set decryption key");
-    AES_cbc_encrypt((const unsigned char*)decPayload.data(), (unsigned char*)decPayload.data(), decryptionSize, &decKey, iv, AES_DECRYPT);
+    AES_cbc_encrypt((const unsigned char*)payload.data(), (unsigned char*)decPayload.data(), decryptionSize, &decKey, iv, AES_DECRYPT);
 #else
 #   ifdef HAVE_COMMCRYPTO
     {
         CCCryptorStatus retval = 0;
-        retassure((retval = CCCrypt(kCCDecrypt, kCCAlgorithmAES, 0, key, keySize, iv, decPayload.data(), decryptionSize, (void*)decPayload.data(), decPayload.size(), NULL)) == kCCSuccess,
+        retassure((retval = CCCrypt(kCCDecrypt, kCCAlgorithmAES, 0, key, keySize, iv, payload.data(), decryptionSize, (void*)decPayload.data(), decPayload.size(), NULL)) == kCCSuccess,
                   "Decryption failed!");
     }
 #   endif //HAVE_COMMCRYPTO

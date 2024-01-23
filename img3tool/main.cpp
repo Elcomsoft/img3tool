@@ -6,6 +6,7 @@
 //
 
 #include <libgeneral/macros.h>
+#include <libgeneral/Utils.hpp>
 #include "../include/img3tool/img3tool.hpp"
 
 #include <iostream>
@@ -73,13 +74,13 @@ void cmd_help(){
     printf("\n");
 }
 
-std::vector<uint8_t> readFromFile(const char *filePath){
+tihmstar::Mem readFromFile(const char *filePath){
     int fd = -1;
     cleanup([&]{
         safeClose(fd);
     });
     struct stat st{};
-    std::vector<uint8_t> ret;
+    tihmstar::Mem ret;
     
     retassure((fd = open(filePath, O_RDONLY))>0, "Failed to open '%s'",filePath);
     retassure(!fstat(fd, &st), "Failed to stat file");
@@ -107,16 +108,6 @@ plist_t readPlistFromFile(const char *filePath){
     return plist;
 }
 #endif //HAVE_PLIST
-
-
-void saveToFile(const char *filePath, std::vector<uint8_t>data){
-    int fd = -1;
-    cleanup([&]{
-        safeClose(fd);
-    });
-    retassure((fd = open(filePath, O_WRONLY | O_CREAT | O_TRUNC, 0644))>0, "failed to create file '%s'",filePath);
-    retassure(write(fd, data.data(), data.size()) == data.size(), "failed to write to file");
-}
 
 MAINFUNCTION
 int main_r(int argc, const char * argv[]) {
@@ -206,7 +197,7 @@ int main_r(int argc, const char * argv[]) {
         }
     }
     
-    std::vector<uint8_t> workingBuf;
+    tihmstar::Mem workingBuf;
 
     if (lastArg) {
         workingBuf = readFromFile(lastArg);
@@ -216,7 +207,7 @@ int main_r(int argc, const char * argv[]) {
         retassure(outFile, "Outfile required for operation");
         const char *compression = NULL;
         auto outdata = getPayloadFromIMG3(workingBuf.data(),workingBuf.size(), decryptIv, decryptKey);
-        saveToFile(outFile, outdata);
+        tihmstar::writeFile(outFile, outdata.data(), outdata.size());
         if (compression) {
             info("Extracted (and uncompressed %s) IMG3 payload to %s",compression,outFile);
         }else{
@@ -225,7 +216,7 @@ int main_r(int argc, const char * argv[]) {
     }else if (flags & FLAG_CREATE) {
         retassure(outFile, "Outfile required for operation");
         retassure(img3Type, "img3Type required for operation");
-        std::vector<uint8_t> img3;
+        tihmstar::Mem img3;
         if (payloadimg3) {
             img3 = readFromFile(payloadimg3);
         }else{
@@ -245,20 +236,20 @@ int main_r(int argc, const char * argv[]) {
 #endif
         }
 
-        saveToFile(outFile, img3);
+        tihmstar::writeFile(outFile, img3.data(), img3.size());
         info("Created IMG3 file at %s",outFile);
     }else if (flags & FLAG_RENAME){
         retassure(outFile, "outputfile required");
 
         auto img3 = renameIMG3(workingBuf.data(), workingBuf.size(), img3Type);
-        saveToFile(outFile, img3);
+        tihmstar::writeFile(outFile, img3.data(), img3.size());
         info("Saved new renamed IMG3 to %s",outFile);
     } else if (replaceTemplateFilePath) {
         retassure(outFile, "Outfile required for operation");
-        std::vector<uint8_t> templateFile = readFromFile(replaceTemplateFilePath);
+        tihmstar::Mem templateFile = readFromFile(replaceTemplateFilePath);
         auto img3 = replaceDATAinIMG3(templateFile, workingBuf);
         img3 = removeTagFromIMG3(img3.data(), img3.size(), 'KBAG');
-        saveToFile(outFile, img3);
+        tihmstar::writeFile(outFile, img3.data(), img3.size());
         info("Created IMG3 file at %s",outFile);
     }else if (flags & FLAG_VERIFY){
         info("Verifying IMG3 file");
